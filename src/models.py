@@ -125,8 +125,50 @@ def train_doc2vec_model(X_train: list[str], y_train: np.ndarray, X_test: list[st
     return (proba >= 0.5).astype(int)
 
 
+class AdditiveAttention(layers.Layer):
+    """Additive attention with learnable context vector (Yang et al. 2016 HAN).
+
+    For each position t:
+        u_t     = tanh(W * h_t + b)           # project hidden state
+        alpha_t = softmax(u_t @ u_context)    # score against context vector
+        output  = sum_t(alpha_t * h_t)        # weighted sum of hidden states
+    """
+
+    def __init__(self, attention_dim: int = 100, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.attention_dim = attention_dim
+
+    def build(self, input_shape: Any) -> None:
+        hidden_dim = int(input_shape[-1])
+        self.W = self.add_weight(
+            name="W", shape=(hidden_dim, self.attention_dim), initializer="glorot_uniform"
+        )
+        self.b = self.add_weight(
+            name="b", shape=(self.attention_dim,), initializer="zeros"
+        )
+        self.u_context = self.add_weight(
+            name="u_context", shape=(self.attention_dim,), initializer="glorot_uniform"
+        )
+        super().build(input_shape)
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        # inputs: (batch, time, hidden_dim)
+        u = tf.tanh(tf.tensordot(inputs, self.W, axes=[[2], [0]]) + self.b)
+        # u: (batch, time, attention_dim)
+        scores = tf.reduce_sum(u * self.u_context, axis=-1, keepdims=True)
+        # scores: (batch, time, 1)
+        weights = tf.nn.softmax(scores, axis=1)
+        return tf.reduce_sum(inputs * weights, axis=1)
+        # output: (batch, hidden_dim)
+
+    def get_config(self) -> dict:
+        config = super().get_config()
+        config["attention_dim"] = self.attention_dim
+        return config
+
+
 class TemporalAttention(layers.Layer):
-    """Simple attention pooling over sequence axis."""
+    """Simple attention pooling (legacy flat model). Use AdditiveAttention for HAN."""
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
@@ -169,6 +211,154 @@ def build_embedding_matrix(
     return matrix, found_vectors > 0
 
 
+def _texts_to_han_tensor(
+    texts: list[str],
+    tokenizer: Tokenizer,
+    NK: int,
+    NT: int,
+) -> np.ndarray:
+    """Build (n_docs, NK, NT) integer tensor from flat preprocessed texts.
+
+    Each document is chunked into NT-word blocks (simulated sentences).
+    Up to NK blocks are kept; shorter documents and blocks are zero-padded.
+    """
+    result = np.zeros((len(texts), NK, NT), dtype=np.int32)
+    for i, text in enumerate(texts):
+        words = text.split()
+        if not words:
+            continue
+        chunks = [words[j: j + NT] for j in range(0, len(words), NT)][:NK]
+        for k, chunk in enumerate(chunks):
+            seq = tokenizer.texts_to_sequences([" ".join(chunk)])[0]
+            seq = seq[:NT]
+            result[i, k, : len(seq)] = seq
+    return result
+
+
+def build_han_model(
+    vocab_size: int,
+    num_labels: int,
+    NK: int,
+    NT: int,
+    embedding_matrix: np.ndarray,
+    embeddings_trainable: bool,
+    word_gru_units: int = 25,
+    sent_gru_units: int = 5,
+    dense_units: int = 50,
+    dropout_rate: float = 0.2,
+    attention_dim: int = 100,
+) -> tf.keras.Model:
+    """Hierarchical Attention Network (Hassan et al., RecSys 2018).
+
+    Two-level architecture:
+        Word encoder  : Embedding(GloVe 300d) -> BiGRU(word_gru_units)
+                        -> AdditiveAttention -> sentence vector
+        Sent encoder  : BiGRU(sent_gru_units) -> AdditiveAttention -> doc vector
+        Classification: Dropout -> Dense(dense_units, relu) -> Dropout
+                        -> Dense(n_tags, sigmoid)
+
+    Input shape : (batch, NK, NT)  e.g. (batch, 10, 50)
+    Output shape: (batch, num_labels)
+    """
+    # --- Word-level encoder (one sentence of NT tokens) ---
+    sentence_input = layers.Input(shape=(NT,), name="sentence_tokens")
+    emb = layers.Embedding(
+        input_dim=vocab_size,
+        output_dim=embedding_matrix.shape[1],
+        weights=[embedding_matrix],
+        trainable=embeddings_trainable,
+        name="word_embedding",
+    )(sentence_input)
+    h_word = layers.Bidirectional(
+        layers.GRU(word_gru_units, return_sequences=True), name="word_bigru"
+    )(emb)
+    # h_word: (batch, NT, 2 * word_gru_units)
+    s_word = AdditiveAttention(attention_dim=attention_dim, name="word_attention")(h_word)
+    # s_word: (batch, 2 * word_gru_units)  — one vector per sentence
+    word_encoder = tf.keras.Model(sentence_input, s_word, name="word_encoder")
+
+    # --- Document-level encoder ---
+    doc_input = layers.Input(shape=(NK, NT), name="document")
+    # Apply the word encoder to each of the NK sentences independently
+    sent_vecs = layers.TimeDistributed(word_encoder, name="sentence_encoding")(doc_input)
+    # sent_vecs: (batch, NK, 2 * word_gru_units)
+    h_sent = layers.Bidirectional(
+        layers.GRU(sent_gru_units, return_sequences=True), name="sent_bigru"
+    )(sent_vecs)
+    # h_sent: (batch, NK, 2 * sent_gru_units)
+    doc_vec = AdditiveAttention(attention_dim=attention_dim, name="sent_attention")(h_sent)
+    # doc_vec: (batch, 2 * sent_gru_units)
+
+    # --- Classification head ---
+    x = layers.Dropout(dropout_rate)(doc_vec)
+    x = layers.Dense(dense_units, activation="relu")(x)
+    x = layers.Dropout(dropout_rate)(x)
+    output = layers.Dense(num_labels, activation="sigmoid")(x)
+
+    model = tf.keras.Model(inputs=doc_input, outputs=output, name="HAN_BiGRU")
+    model.compile(
+        optimizer=tf.keras.optimizers.SGD(learning_rate=0.01),
+        loss="binary_crossentropy",
+    )
+    return model
+
+
+def train_han_model(
+    X_train: list[str],
+    y_train: np.ndarray,
+    X_test: list[str],
+    max_words: int = 15000,
+    NK: int = 10,
+    NT: int = 50,
+    glove_path: str | Path | None = "data/glove.6B.300d.txt",
+    epochs: int = 5,
+    batch_size: int = 64,
+) -> np.ndarray:
+    """Train the hierarchical attention model (paper reproduction).
+
+    Flat lemmatized strings are chunked into (NK=10, NT=50) tensors to feed
+    the two-level bi-GRU + attention architecture (Hassan et al., RecSys 2018).
+    """
+    tokenizer = Tokenizer(num_words=max_words, oov_token="<UNK>")
+    tokenizer.fit_on_texts(X_train)
+
+    X_train_3d = _texts_to_han_tensor(X_train, tokenizer, NK, NT)
+    X_test_3d = _texts_to_han_tensor(X_test, tokenizer, NK, NT)
+
+    vocab_size = min(max_words, len(tokenizer.word_index) + 1)
+    embedding_matrix, has_pretrained = build_embedding_matrix(
+        tokenizer=tokenizer,
+        vocab_size=vocab_size,
+        glove_path=glove_path,
+        embedding_dim=300,
+    )
+
+    model = build_han_model(
+        vocab_size=vocab_size,
+        num_labels=y_train.shape[1],
+        NK=NK,
+        NT=NT,
+        embedding_matrix=embedding_matrix,
+        embeddings_trainable=not has_pretrained,
+    )
+    early_stop = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=2, restore_best_weights=True)
+    model.fit(
+        X_train_3d,
+        y_train,
+        validation_split=0.1,
+        epochs=epochs,
+        batch_size=batch_size,
+        verbose=0,
+        callbacks=[early_stop],
+    )
+    proba = model.predict(X_test_3d, verbose=0)
+    return (proba >= 0.5).astype(int)
+
+
+# ---------------------------------------------------------------------------
+# Legacy flat bi-GRU + single attention (kept for comparison / backward compat)
+# ---------------------------------------------------------------------------
+
 def build_bigru_attention_model(
     vocab_size: int,
     num_labels: int,
@@ -176,6 +366,7 @@ def build_bigru_attention_model(
     embedding_matrix: np.ndarray,
     embeddings_trainable: bool,
 ) -> tf.keras.Model:
+    """Flat (non-hierarchical) bi-GRU + attention. Legacy — use build_han_model."""
     input_ids = layers.Input(shape=(max_len,), name="tokens")
     x = layers.Embedding(
         input_dim=vocab_size,
@@ -207,6 +398,7 @@ def train_bigru_attention_model(
     epochs: int = 5,
     batch_size: int = 64,
 ) -> np.ndarray:
+    """Flat bi-GRU + attention (legacy). Use train_han_model for paper reproduction."""
     tokenizer = Tokenizer(num_words=max_words, oov_token="<UNK>")
     tokenizer.fit_on_texts(X_train)
 

@@ -9,7 +9,7 @@ from sklearn.preprocessing import MultiLabelBinarizer
 
 from src.models import (
     evaluate_predictions,
-    train_bigru_attention_model,
+    train_han_model,
     train_doc2vec_model,
     train_lda_model,
     train_nb_model,
@@ -50,7 +50,7 @@ def run_all_models(
     preds["SVM"] = train_svm_model(X_train, y_train, X_test)
     preds["LDA"] = train_lda_model(X_train, y_train, X_test, n_topics=n_topics)
     preds["Paragraph Vector"] = train_doc2vec_model(X_train, y_train, X_test)
-    preds["Bi-GRU+Att"] = train_bigru_attention_model(X_train, y_train, X_test, glove_path=glove_path)
+    preds["Bi-GRU+Att"] = train_han_model(X_train, y_train, X_test, glove_path=glove_path)
 
     rows = []
     for model_name, y_pred in preds.items():
