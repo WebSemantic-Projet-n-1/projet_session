@@ -5,7 +5,7 @@ import re
 
 import nltk
 import pandas as pd
-from nltk.corpus import stopwords
+from nltk.corpus import stopwords, wordnet as wn
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 
@@ -39,15 +39,15 @@ def load_simple_dataset(csv_path: str | Path) -> pd.DataFrame:
 
 
 def ensure_nltk_resources(allow_download: bool = True) -> None:
-    resources = [
+    path_resources = [
         ("tokenizers/punkt", "punkt"),
         ("tokenizers/punkt_tab", "punkt_tab"),
         ("corpora/stopwords", "stopwords"),
-        ("corpora/wordnet", "wordnet"),
-        ("corpora/omw-1.4", "omw-1.4"),
     ]
     missing: list[str] = []
-    for path_key, download_key in resources:
+
+    # 1) Check classique pour tokenizer/stopwords
+    for path_key, download_key in path_resources:
         try:
             nltk.data.find(path_key)
         except LookupError:
@@ -57,12 +57,26 @@ def ensure_nltk_resources(allow_download: bool = True) -> None:
                 nltk.data.find(path_key)
             except LookupError:
                 missing.append(download_key)
+
+    # 2) Check wordnet via API (plus fiable que nltk.data.find dans certains conteneurs)
+    def check_wordnet() -> bool:
+        try:
+            _ = wn.synsets("dog")
+            return True
+        except LookupError:
+            return False
+    if not check_wordnet():
+        if allow_download:
+            nltk.download("wordnet", quiet=True)
+            nltk.download("omw-1.4", quiet=True)
+        if not check_wordnet():
+            missing.extend(["wordnet", "omw-1.4"])
     if missing:
-        missing_list = ", ".join(missing)
+        uniq = ", ".join(sorted(set(missing)))
         raise RuntimeError(
             "Missing NLTK resources: "
-            f"{missing_list}. Install them with: "
-            f"python -m nltk.downloader {missing_list}"
+            f"{uniq}. Install them with: "
+            f"python -m nltk.downloader {' '.join(sorted(set(missing)))}"
         )
 
 
