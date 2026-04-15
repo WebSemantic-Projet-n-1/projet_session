@@ -1,0 +1,16 @@
+services:
+  notebook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: semantic_tag_notebook
+    ports:
+      - "8891:8888"
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - JUPYTER_TOKEN:websem
+    gpus: all

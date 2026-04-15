@@ -1,0 +1,13 @@
+title,abstract,tags
+Deep learning for text classification,We study neural approaches for classifying long scientific documents and evaluating quality.,machine learning|classification|deep learning
+Topic models for tags,Latent topic structures improve retrieval and can be used to suggest user tags.,topic modeling|information retrieval
+A survey on recommendation systems,This article reviews recommendation methods and discusses ranking and evaluation.,recommendation|survey|ranking
+Learning representations of documents,Distributed vectors capture semantic meaning from text corpora.,embeddings|representation learning|deep learning
+Attention mechanisms in NLP,Attention allows models to focus on important words in sequence modeling tasks.,attention|nlp|deep learning
+Support vector machines in practice,Linear classifiers remain strong baselines for sparse text features.,svm|classification|baseline
+Naive Bayes for document tagging,Probabilistic methods are fast and robust for multi label text prediction.,naive bayes|classification|multi label
+Semantic indexing for papers,Indexing scientific papers with tags helps organization and retrieval.,semantic web|tagging|information retrieval
+Neural sequence models for abstracts,Recurrent neural networks model dependencies in scientific abstracts.,rnn|nlp|deep learning
+Improving search in digital libraries,Better metadata and tags improve discovery in scholarly search engines.,digital libraries|search|tagging
+Graph based recommendation,User item graphs can improve recommendation diversity and relevance.,recommendation|graphs|ranking
+Evaluation metrics for imbalanced data,Micro precision recall and f1 are useful for skewed multi label tasks.,evaluation|metrics|multi label
