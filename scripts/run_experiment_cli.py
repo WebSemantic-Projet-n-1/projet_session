@@ -16,8 +16,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run tag recommendation experiment and print metrics.")
     parser.add_argument(
         "--data-path",
-        default="data/citeulike_top10.csv",
-        help="CSV dataset path with columns: title, abstract, tags",
+        default="data/citeulike-a/raw-data.csv",
+        help="Dataset CSV path (CiteULike raw-data schema).",
     )
     parser.add_argument(
         "--glove-path",

@@ -20,7 +20,7 @@ from src.visualization import (
 
 
 def main() -> None:
-    data_path = PROJECT_ROOT / "data" / "citeulike_top10.csv"
+    data_path = PROJECT_ROOT / "data" / "citeulike-a" / "raw-data.csv"
     glove_path = PROJECT_ROOT / "data" / "glove.6B.300d.txt"
     output_dir = PROJECT_ROOT / "data" / "figures"
     output_dir.mkdir(parents=True, exist_ok=True)

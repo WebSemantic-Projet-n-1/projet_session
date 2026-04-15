@@ -20,7 +20,6 @@ Source article: [https://dl.acm.org/doi/pdf/10.1145/3240323.3240409](https://dl.
 - `src/experiment.py`: orchestration des expériences.
 - `src/visualization.py`: **toutes les visualisations** (sorties du notebook).
 - `data/citeulike-a/`: dataset CiteULike-A (depuis GitHub).
-- `data/citeulike_top10.csv`: jeu de données CSV simple (exemple).
 - `scripts/run_experiment_cli.py`: exécution hors notebook, sortie des métriques dans le terminal.
 
 ## Format de données attendu (simple)
@@ -53,7 +52,7 @@ Fichiers principaux installés:
 - `data/citeulike-a/vocabulary.dat`
 - `data/citeulike-a/citations.dat`
 
-Remarque: le pipeline actuel lit un CSV simple `title, abstract, tags` (ex: `data/citeulike_top10.csv`). Le dataset `citeulike-a` est bien installé pour la suite des travaux et l'intégration complète dans le pipeline.
+Remarque: le pipeline lit `data/citeulike-a/raw-data.csv` et reconstruit les tags via `item-tag.dat` + `tags.dat`.
 
 ## GloVe (optionnel mais recommandé)
 
@@ -97,7 +96,7 @@ python scripts/run_experiment_cli.py
 Options utiles:
 
 ```bash
-python scripts/run_experiment_cli.py --data-path data/citeulike_top10.csv --glove-path data/glove.6B.300d.txt --top-k-tags 10 --test-size 0.1 --seed 42
+python scripts/run_experiment_cli.py --data-path data/citeulike-a/raw-data.csv --glove-path data/glove.6B.300d.txt --top-k-tags 10 --test-size 0.1 --seed 42
 ```
 
 ## Workflow notebook
