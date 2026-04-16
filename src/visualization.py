@@ -11,8 +11,10 @@ sns.set_theme(style="whitegrid")
 def plot_tag_distribution(df: pd.DataFrame, top_n: int = 20) -> plt.Figure:
     tags = [tag for tags_list in df["tag_list"] for tag in tags_list]
     counts = pd.Series(tags).value_counts().head(top_n)
+    # height = top_n/2 if top_n < 20 else 10
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+
+    fig, ax = plt.subplots(figsize=(10, 30))
     sns.barplot(x=counts.values, y=counts.index, ax=ax, palette="viridis")
     ax.set_title("Top Tag Distribution")
     ax.set_xlabel("Frequency")
@@ -25,8 +27,13 @@ def plot_text_length_distributions(df: pd.DataFrame) -> plt.Figure:
     fig, axes = plt.subplots(1, 3, figsize=(16, 4))
     sns.histplot(df["title_words"], bins=30, kde=True, ax=axes[0], color="#4C72B0")
     axes[0].set_title("Title Length (words)")
-    sns.histplot(df["abstract_words"], bins=30, kde=True, ax=axes[1], color="#55A868")
+    # Focus the abstract histogram on the main mass instead of a sparse long tail.
+    abstract_view_max = min(1000, float(df["abstract_words"].quantile(0.99)))
+    abstract_view_max = max(50, abstract_view_max)
+    abstract_words_main = df.loc[df["abstract_words"] <= abstract_view_max, "abstract_words"]
+    sns.histplot(abstract_words_main, bins=30, kde=True, ax=axes[1], color="#55A868")
     axes[1].set_title("Abstract Length (words)")
+    axes[1].set_xlim(0, abstract_view_max)
     sns.histplot(df["num_tags"], bins=15, kde=False, ax=axes[2], color="#C44E52")
     axes[2].set_title("Tags per Document")
     fig.tight_layout()
