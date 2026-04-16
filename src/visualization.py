@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
@@ -79,6 +80,89 @@ def plot_article_vs_current(metrics_df: pd.DataFrame) -> plt.Figure:
         axes[i].tick_params(axis="x", rotation=25)
 
     axes[0].set_ylabel("Score")
+    for ax in axes[1:]:
+        ax.set_ylabel("")
+    fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Multi-run (mean ± std) variants — used after run_experiments_k_times
+# ---------------------------------------------------------------------------
+
+_METRICS = ["micro_recall", "micro_precision", "micro_f1"]
+_PALETTE = ["#4C72B0", "#55A868", "#C44E52"]
+
+
+def plot_model_metrics_agg(agg_df: pd.DataFrame) -> plt.Figure:
+    """Grouped bar chart with std error bars from aggregated multi-run results.
+
+    agg_df must have columns: name, micro_recall_mean/std, micro_precision_mean/std, micro_f1_mean/std.
+    """
+    names = agg_df["name"].tolist()
+    x = np.arange(len(names))
+    width = 0.25
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for i, metric in enumerate(_METRICS):
+        means = agg_df[f"{metric}_mean"].to_numpy()
+        stds = agg_df[f"{metric}_std"].to_numpy()
+        ax.bar(
+            x + i * width,
+            means,
+            width,
+            yerr=stds,
+            capsize=4,
+            label=metric.replace("_", " ").title(),
+            color=_PALETTE[i],
+        )
+
+    ax.set_xticks(x + width)
+    ax.set_xticklabels(names, rotation=20, ha="right")
+    ax.set_title("Model Comparison — Mean ± Std (5 runs, paper protocol)")
+    ax.set_ylabel("Score")
+    ax.set_ylim(0, 1)
+    ax.legend()
+    fig.tight_layout()
+    return fig
+
+
+def plot_article_vs_current_agg(agg_df: pd.DataFrame) -> plt.Figure:
+    """Side-by-side comparison of paper Table 2 vs. current aggregated results.
+
+    agg_df must have columns: name, micro_recall_mean, micro_precision_mean, micro_f1_mean.
+    """
+    article = pd.DataFrame(
+        [
+            {"name": "NB", "micro_recall": 0.03, "micro_precision": 0.21, "micro_f1": 0.05},
+            {"name": "SVM", "micro_recall": 0.05, "micro_precision": 0.20, "micro_f1": 0.09},
+            {"name": "LDA", "micro_recall": 0.16, "micro_precision": 0.20, "micro_f1": 0.17},
+            {"name": "Paragraph Vector", "micro_recall": 0.24, "micro_precision": 0.22, "micro_f1": 0.22},
+            {"name": "Bi-GRU+Att", "micro_recall": 0.44, "micro_precision": 0.20, "micro_f1": 0.28},
+        ]
+    )
+
+    current = agg_df[["name", "micro_recall_mean", "micro_precision_mean", "micro_f1_mean"]].rename(
+        columns={
+            "micro_recall_mean": "micro_recall",
+            "micro_precision_mean": "micro_precision",
+            "micro_f1_mean": "micro_f1",
+        }
+    )
+
+    merged = current.merge(article, on="name", suffixes=("_current", "_article"))
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4), sharey=True)
+
+    for i, metric in enumerate(_METRICS):
+        plot_df = merged[["name", f"{metric}_current", f"{metric}_article"]].melt(
+            id_vars=["name"], var_name="source", value_name="value"
+        )
+        sns.barplot(data=plot_df, x="name", y="value", hue="source", ax=axes[i])
+        axes[i].set_title(metric.replace("_", " ").title())
+        axes[i].set_xlabel("Model")
+        axes[i].tick_params(axis="x", rotation=25)
+
+    axes[0].set_ylabel("Score (mean over 5 runs)")
     for ax in axes[1:]:
         ax.set_ylabel("")
     fig.tight_layout()
