@@ -13,7 +13,7 @@ from nltk.tokenize import word_tokenize
 
 
 
-def load_citeulike_a_dataset(csv_path: str | Path) -> pd.DataFrame:
+def load_citeulike_a_dataset(csv_path: str | Path, normalize_tags: bool = False) -> pd.DataFrame:
     dat_files_list = glob.glob(str(csv_path / "*.dat"))
 
     item_tag_df = None
@@ -49,7 +49,7 @@ def load_citeulike_a_dataset(csv_path: str | Path) -> pd.DataFrame:
                 if pd.notna(tag):
                     tags_bag.append(str(tag).strip())
             rows.append({
-                "title": raw_data_df.iloc[i, 1],
+                "title": raw_data_df.iloc[i, 3],
                 "abstract": raw_data_df.iloc[i, 4],
                 "tags": "|".join(tags_bag),
             })
@@ -59,6 +59,8 @@ def load_citeulike_a_dataset(csv_path: str | Path) -> pd.DataFrame:
     df["title"] = df["title"].fillna("").astype(str)
     df["abstract"] = df["abstract"].fillna("").astype(str)
     df["tags"] = df["tags"].fillna("").astype(str)
+    if normalize_tags:
+        df["tags"] = df["tags"].apply(normalize_tags)
     df["text"] = (df["title"] + ". " + df["abstract"]).str.strip()
 
     return df
@@ -107,6 +109,20 @@ def ensure_nltk_resources(allow_download: bool = True) -> None:
         )
 
 
+def normalize_tags(tag_string: str, sep: str = "|") -> str:
+    lemmatizer = WordNetLemmatizer()
+    tags = [t.strip().lower() for t in tag_string.split(sep) if t.strip()]
+    normalized = []
+    seen = set()
+    for tag in tags:
+        words = tag.split()
+        lemma = " ".join(lemmatizer.lemmatize(w) for w in words)
+        if lemma not in seen:
+            seen.add(lemma)
+            normalized.append(lemma)
+    return sep.join(normalized)
+
+
 def preprocess_text_nltk(df: pd.DataFrame, allow_download: bool = True) -> pd.DataFrame:
     """Apply article-like preprocessing: tokenize, remove stopwords, lemmatize."""
     ensure_nltk_resources(allow_download=allow_download)
@@ -116,6 +132,9 @@ def preprocess_text_nltk(df: pd.DataFrame, allow_download: bool = True) -> pd.Da
     def clean(text: str) -> str:
         text = text.lower()
         text = re.sub(r"[^a-z0-9\s]", " ", text)
+        text = re.sub(r'\$[^$]*\$', ' ', text)       # remove inline math
+        text = re.sub(r'\\[a-zA-Z]+', ' ', text)     # remove \commands
+        text = re.sub(r'[{}]', '', text)              # remove braces
         tokens = word_tokenize(text)
         tokens = [lemmatizer.lemmatize(tok) for tok in tokens if tok not in sw and tok.strip()]
         return " ".join(tokens)
