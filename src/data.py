@@ -11,8 +11,6 @@ from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 
 
-REQUIRED_COLUMNS = ["title", "abstract", "tags"]
-
 
 
 def load_citeulike_a_dataset(csv_path: str | Path) -> pd.DataFrame:
@@ -39,20 +37,25 @@ def load_citeulike_a_dataset(csv_path: str | Path) -> pd.DataFrame:
     if item_tag_df is not None:
         row = item_tag_df.shape[0]
 
-    df = pd.DataFrame()
-    for i in range(row) :
-        if int(item_tag_df.iloc[i, 0].split()[0]) != 0:
-            item_title = raw_data_df.iloc[i, 1]
-            item_abstract = raw_data_df.iloc[i, 4]
+    tags_lookup = tags_df.iloc[:, 0].tolist()
+
+    rows: list[dict[str, str]] = []
+    for i in range(row):
+        parts = item_tag_df.iloc[i, 0].split()
+        if int(parts[0]) != 0:
             tags_bag: list[str] = []
-            for tags_id in item_tag_df.iloc[i, 0].split()[1:]:
-                tag = tags_df.iloc[int(tags_id), 0]
+            for tags_id in parts[1:]:
+                tag = tags_lookup[int(tags_id)]
                 if pd.notna(tag):
                     tags_bag.append(str(tag).strip())
-            tags_str = "|".join(tags_bag)
-            df = pd.concat([df, pd.DataFrame({'title': [item_title], 'abstract': [item_abstract], 'tags': [tags_str]})], ignore_index=True)
+            rows.append({
+                "title": raw_data_df.iloc[i, 1],
+                "abstract": raw_data_df.iloc[i, 4],
+                "tags": "|".join(tags_bag),
+            })
 
-    df = df.copy()
+    df = pd.DataFrame(rows, columns=["title", "abstract", "tags"])
+
     df["title"] = df["title"].fillna("").astype(str)
     df["abstract"] = df["abstract"].fillna("").astype(str)
     df["tags"] = df["tags"].fillna("").astype(str)
