@@ -1,0 +1,30 @@
+services:
+  notebook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: semantic_tag_notebook
+    ports:
+      - "8891:8891"
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    environment:
+      JUPYTER_TOKEN: "websem"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+      NVIDIA_DISABLE_REQUIRE: "1"
+    gpus:
+      - driver: nvidia
+        count: all
+        capabilities: [compute, utility]
+    shm_size: "4g"        # ou 2g/4g si besoin
+    ipc: host             # recommandé pour TF/GPU
+    command: >
+      bash -lc "jupyter lab
+      --ip=0.0.0.0
+      --port=8891
+      --no-browser
+      --NotebookApp.token=websem
+      --NotebookApp.allow_origin='*'
+      --allow-root"
