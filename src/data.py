@@ -8,7 +8,7 @@ import nltk
 import pandas as pd
 from nltk.corpus import stopwords, wordnet as wn
 from nltk.stem import WordNetLemmatizer
-from nltk.tokenize import word_tokenize
+from nltk.tokenize import word_tokenize, sent_tokenize
 
 
 
@@ -144,8 +144,30 @@ def preprocess_text_nltk(df: pd.DataFrame, allow_download: bool = True) -> pd.Da
     return out
 
 
+
+def build_sentence_preprocessed(df: pd.DataFrame) -> pd.DataFrame:
+    """Preprocess per sentence while keeping sentence boundaries."""
+    lemmatizer = WordNetLemmatizer()
+    sw = set(stopwords.words("english"))
+    def clean(sent: str) -> str:
+        sent = sent.lower()
+        sent = re.sub(r"[^a-z0-9\s.]", " ", sent)  # garder le point
+        tokens = word_tokenize(sent)
+        tokens = [lemmatizer.lemmatize(t) for t in tokens if t not in sw and t.strip() and t != "."]
+        return " ".join(tokens)
+    def process(text: str) -> str:
+        sents = sent_tokenize(text)
+        cleaned = [clean(s) for s in sents if s.strip()]
+        return " . ".join(cleaned)  # . comme séparateur de phrase
+    out = df.copy()
+    out["processed_sentences"] = out["text"].apply(process)
+    return out
+
+
+
 def split_tags(tag_string: str, sep: str = "|") -> list[str]:
     return [t.strip().lower() for t in tag_string.split(sep) if t.strip()]
+
 
 
 def keep_top_k_tags(df: pd.DataFrame, top_k: int = 10, sep: str = "|") -> pd.DataFrame:
