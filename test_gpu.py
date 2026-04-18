@@ -75,17 +75,21 @@ def test_tensorflow():
         if gpus:
             for i, gpu in enumerate(gpus):
                 print(f"\n📊 GPU {i}: {gpu.name}")
-                
-                # Get detailed info
+
                 try:
                     tf.config.experimental.set_memory_growth(gpu, True)
-                    
-                    # Test computation
-                    with tf.device(gpu.name):
+
+                    # Upstream bug: gpu.name is '/physical_device:GPU:0'
+                    # but tf.device() expects '/GPU:0' or '/device:GPU:0'.
+                    device_spec = f"/GPU:{i}"
+                    with tf.device(device_spec):
                         a = tf.random.normal([1000, 1000])
                         b = tf.random.normal([1000, 1000])
                         c = tf.matmul(a, b)
-                        print(f"   ✅ Computation test passed")
+                        # Force materialization so PTX→SASS is actually compiled
+                        # and cached in CUDA_CACHE_PATH.
+                        _ = c.numpy().sum()
+                        print(f"   ✅ Computation test passed on {device_spec}")
                 except Exception as e:
                     print(f"   ❌ Computation test failed: {e}")
             

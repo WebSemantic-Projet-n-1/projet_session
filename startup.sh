@@ -55,4 +55,8 @@ if torch.cuda.is_available():
             break
 " 2>/dev/null
 
-exec /bin/bash
+if [ "$#" -gt 0 ]; then
+    exec "$@"      # lance le CMD passé par compose/run
+else
+    exec /bin/bash # fallback interactif
+fi

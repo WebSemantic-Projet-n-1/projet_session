@@ -295,7 +295,7 @@ def train_bigru_attention_model(
     glove_path: str | Path | None = "data/glove.6B.300d.txt",
     epochs: int = 30,
     batch_size: int = 64,
-) -> np.ndarray:
+) -> tuple[np.ndarray, dict]:
     print("Training Bi-GRU+Attention model...")
     tokenizer = Tokenizer(num_words=max_words, oov_token="<UNK>")
     tokenizer.fit_on_texts(X_train)
@@ -321,7 +321,7 @@ def train_bigru_attention_model(
     )
     # early_stop = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=2, restore_best_weights=True)
     early_stop = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
-    model.fit(
+    history = model.fit(
         X_train_pad,
         y_train,
         validation_split=0.1,
@@ -331,8 +331,7 @@ def train_bigru_attention_model(
         callbacks=[early_stop],
     )
     proba = model.predict(X_test_pad, verbose=0)
-    # return (proba >= 0.5).astype(int)
-    return proba
+    return proba, dict(history.history)
 
 
 
@@ -463,7 +462,7 @@ def train_hierarchical_bigru_attention_model(
     glove_path: str | Path | None = "data/glove.6B.300d.txt",
     epochs: int = 30,
     batch_size: int = 64,
-) -> np.ndarray:
+) -> tuple[np.ndarray, dict]:
     print("Training Hierarchical Bi-GRU+Attention model...")
     tokenizer = Tokenizer(num_words=max_words_vocab, oov_token="<UNK>")
     tokenizer.fit_on_texts(X_train)
@@ -496,7 +495,7 @@ def train_hierarchical_bigru_attention_model(
     early_stop = tf.keras.callbacks.EarlyStopping(
         monitor="val_loss", patience=5, restore_best_weights=True
     )
-    model.fit(
+    history = model.fit(
         X_train_h,
         y_train,
         validation_split=0.1,
@@ -506,4 +505,4 @@ def train_hierarchical_bigru_attention_model(
         callbacks=[early_stop],
     )
     proba = model.predict(X_test_h, verbose=0)
-    return proba
+    return proba, dict(history.history)
