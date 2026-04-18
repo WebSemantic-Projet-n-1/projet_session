@@ -1,0 +1,143 @@
+#========================================================================
+# Multi-stage build:
+#  - Stage 1 (tf_builder): compiles TensorFlow from source for Blackwell
+#    (sm_120) using LLVM 20 + Bazel, producing a CP311 wheel.
+#  - Stage 2 (runtime): Python 3.11 venv + PyTorch nightly cu128 + the
+#    locally-built TF wheel + project NLP deps + Jupyter Lab.
+#
+# Build: ~1-3 h first time (TF compile), seconds afterwards thanks to the
+# Bazel cache mount. Resulting image: ~10-12 GB.
+#========================================================================
+
+
+#------------------------------------------------------------------------
+# STAGE 1: Build TF wheel for Blackwell (sm_120)
+#------------------------------------------------------------------------
+    FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04 AS tf_builder
+
+    ENV DEBIAN_FRONTEND=noninteractive
+    WORKDIR /workspace
+    
+    # Build-time deps + Python 3.12 (matches the default Bazel hermetic
+    # toolchain; it will produce a cp312 wheel consistent with the runtime stage).
+    RUN --mount=target=/var/lib/apt/lists,type=cache,id=apt-lists \
+        --mount=target=/var/cache/apt,type=cache,id=apt-cache \
+        rm -f /etc/apt/apt.conf.d/docker-clean && \
+        apt update && \
+        apt install -y --no-install-recommends \
+            wget software-properties-common gpg-agent ca-certificates \
+            lsb-release git curl unzip build-essential pkg-config \
+            python3.12-venv python3.12-dev
+
+    # LLVM/Clang 21 (sm_120 support was added in LLVM 21; LLVM 20 only has sm_100).
+    # We need cuda_clang to compile sm_120 kernels for Blackwell RTX 50-series.
+    RUN --mount=target=/var/lib/apt/lists,type=cache,id=apt-lists \
+        --mount=target=/var/cache/apt,type=cache,id=apt-cache \
+        wget -O llvm.sh https://apt.llvm.org/llvm.sh && \
+        chmod +x llvm.sh && \
+        ./llvm.sh 21 all && \
+        update-alternatives --install /usr/bin/clang clang /usr/bin/clang-21 100 && \
+        rm llvm.sh
+
+    
+    # Bazelisk (Bazel wrapper)
+    RUN wget https://github.com/bazelbuild/bazelisk/releases/download/v1.26.0/bazelisk-linux-amd64 -O /usr/bin/bazel && \
+        chmod +x /usr/bin/bazel && bazel version
+    
+    # Clone TF and apply our Bazel config
+    RUN git clone --depth 1 https://github.com/tensorflow/tensorflow.git
+    WORKDIR /workspace/tensorflow
+    COPY .tf_configure.bazelrc .
+    
+    # Build the wheel (Bazel cache mount makes rebuilds ~ instant)
+    RUN --mount=type=cache,target=/root/.cache/bazel,id=bazel-cache \
+        bazel build //tensorflow/tools/pip_package:wheel \
+            --repo_env=USE_PYWRAP_RULES=1 \
+            --repo_env=WHEEL_NAME=tensorflow \
+            --config=cuda --config=cuda_wheel && \
+        cp /workspace/tensorflow/bazel-bin/tensorflow/tools/pip_package/wheel_house/*.whl /workspace/
+    
+    
+    #------------------------------------------------------------------------
+    # STAGE 2: Runtime image (project + PyTorch + custom TF wheel)
+    #------------------------------------------------------------------------
+    FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+    
+    LABEL maintainer="Dennis Consorte (original) / UQO web-semantique project (fork)"
+    LABEL description="PyTorch nightly + TensorFlow built-from-source for NVIDIA Blackwell (sm_120). Includes the project's NLP stack."
+    
+    ENV DEBIAN_FRONTEND=noninteractive
+    RUN mkdir /workspace
+    WORKDIR /workspace
+    
+    # Base deps
+    RUN apt update --fix-missing && \
+        apt install -y --no-install-recommends \
+            software-properties-common \
+            gpg-agent \
+            ca-certificates \
+            wget \
+            curl \
+            git \
+            unzip \
+            lsb-release && \
+        apt clean && rm -rf /var/lib/apt/lists/*
+    # Python 3.12 (matches the cp312 wheel built in stage 1; this is Ubuntu 24.04's default)
+    RUN apt update && \
+    apt install -y --no-install-recommends \
+        python3.12-venv \
+        python3.12-dev \
+        build-essential \
+        pkg-config \
+        libopenblas-dev \
+        libjpeg-dev \
+        libpng-dev \
+        libhdf5-dev && \
+    apt clean && rm -rf /var/lib/apt/lists/*
+        
+    # venv (pip is bootstrapped by ensurepip inside python3.12-venv)
+    RUN python3.12 -m venv /opt/venv
+    ENV VIRTUAL_ENV=/opt/venv
+    ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+    RUN pip install --upgrade pip setuptools wheel
+    
+    # CUDA env
+    ENV CUDA_HOME=/usr/local/cuda-12.8
+    ENV PATH=${CUDA_HOME}/bin:${PATH}
+    ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+    ENV CUDA_CACHE_PATH=/root/.nv/ComputeCache
+    ENV CUDA_CACHE_MAXSIZE=4294967296
+    
+    # PyTorch nightly cu128 (Blackwell-ready)
+    RUN pip install --pre torch torchvision torchaudio \
+        --index-url https://download.pytorch.org/whl/nightly/cu128/
+    
+    # >>> THE KEY DIFFERENCE <<<
+    # Install our locally-built TF wheel (cp311, sm_120) instead of tf-nightly.
+    COPY --from=tf_builder /workspace/*.whl /tmp/
+    RUN pip install --no-cache-dir /tmp/tensorflow*.whl && rm /tmp/tensorflow*.whl
+    
+    # Project NLP deps + NLTK corpora
+    RUN pip install --no-cache-dir \
+            numpy \
+            scipy \
+            pandas \
+            matplotlib \
+            seaborn \
+            scikit-learn \
+            jupyter \
+            jupyterlab \
+            tqdm \
+            pillow \
+            h5py \
+            pyyaml \
+            tensorboard \
+            nltk \
+            gensim && \
+        python -m nltk.downloader punkt punkt_tab stopwords wordnet omw-1.4
+    
+    COPY test_gpu.py /workspace/test_gpu.py
+    COPY startup.sh /startup.sh
+    RUN chmod +x /startup.sh
+    
+    ENTRYPOINT ["/startup.sh"]

@@ -8,14 +8,12 @@ import nltk
 import pandas as pd
 from nltk.corpus import stopwords, wordnet as wn
 from nltk.stem import WordNetLemmatizer
-from nltk.tokenize import word_tokenize
-
-
-REQUIRED_COLUMNS = ["title", "abstract", "tags"]
+from nltk.tokenize import word_tokenize, sent_tokenize
 
 
 
-def load_citeulike_a_dataset(csv_path: str | Path) -> pd.DataFrame:
+
+def load_citeulike_a_dataset(csv_path: str | Path, normalize_tags: bool = False) -> pd.DataFrame:
     dat_files_list = glob.glob(str(csv_path / "*.dat"))
 
     item_tag_df = None
@@ -39,23 +37,30 @@ def load_citeulike_a_dataset(csv_path: str | Path) -> pd.DataFrame:
     if item_tag_df is not None:
         row = item_tag_df.shape[0]
 
-    df = pd.DataFrame()
-    for i in range(row) :
-        if int(item_tag_df.iloc[i, 0].split()[0]) != 0:
-            item_title = raw_data_df.iloc[i, 1]
-            item_abstract = raw_data_df.iloc[i, 4]
+    tags_lookup = tags_df.iloc[:, 0].tolist()
+
+    rows: list[dict[str, str]] = []
+    for i in range(row):
+        parts = item_tag_df.iloc[i, 0].split()
+        if int(parts[0]) != 0:
             tags_bag: list[str] = []
-            for tags_id in item_tag_df.iloc[i, 0].split()[1:]:
-                tag = tags_df.iloc[int(tags_id), 0]
+            for tags_id in parts[1:]:
+                tag = tags_lookup[int(tags_id)]
                 if pd.notna(tag):
                     tags_bag.append(str(tag).strip())
-            tags_str = "|".join(tags_bag)
-            df = pd.concat([df, pd.DataFrame({'title': [item_title], 'abstract': [item_abstract], 'tags': [tags_str]})], ignore_index=True)
+            rows.append({
+                "title": raw_data_df.iloc[i, 3],
+                "abstract": raw_data_df.iloc[i, 4],
+                "tags": "|".join(tags_bag),
+            })
 
-    df = df.copy()
+    df = pd.DataFrame(rows, columns=["title", "abstract", "tags"])
+
     df["title"] = df["title"].fillna("").astype(str)
     df["abstract"] = df["abstract"].fillna("").astype(str)
     df["tags"] = df["tags"].fillna("").astype(str)
+    if normalize_tags:
+        df["tags"] = df["tags"].apply(normalize_tags)
     df["text"] = (df["title"] + ". " + df["abstract"]).str.strip()
 
     return df
@@ -104,6 +109,20 @@ def ensure_nltk_resources(allow_download: bool = True) -> None:
         )
 
 
+def normalize_tags(tag_string: str, sep: str = "|") -> str:
+    lemmatizer = WordNetLemmatizer()
+    tags = [t.strip().lower() for t in tag_string.split(sep) if t.strip()]
+    normalized = []
+    seen = set()
+    for tag in tags:
+        words = tag.split()
+        lemma = " ".join(lemmatizer.lemmatize(w) for w in words)
+        if lemma not in seen:
+            seen.add(lemma)
+            normalized.append(lemma)
+    return sep.join(normalized)
+
+
 def preprocess_text_nltk(df: pd.DataFrame, allow_download: bool = True) -> pd.DataFrame:
     """Apply article-like preprocessing: tokenize, remove stopwords, lemmatize."""
     ensure_nltk_resources(allow_download=allow_download)
@@ -113,6 +132,9 @@ def preprocess_text_nltk(df: pd.DataFrame, allow_download: bool = True) -> pd.Da
     def clean(text: str) -> str:
         text = text.lower()
         text = re.sub(r"[^a-z0-9\s]", " ", text)
+        text = re.sub(r'\$[^$]*\$', ' ', text)       # remove inline math
+        text = re.sub(r'\\[a-zA-Z]+', ' ', text)     # remove \commands
+        text = re.sub(r'[{}]', '', text)              # remove braces
         tokens = word_tokenize(text)
         tokens = [lemmatizer.lemmatize(tok) for tok in tokens if tok not in sw and tok.strip()]
         return " ".join(tokens)
@@ -122,8 +144,30 @@ def preprocess_text_nltk(df: pd.DataFrame, allow_download: bool = True) -> pd.Da
     return out
 
 
+
+def build_sentence_preprocessed(df: pd.DataFrame) -> pd.DataFrame:
+    """Preprocess per sentence while keeping sentence boundaries."""
+    lemmatizer = WordNetLemmatizer()
+    sw = set(stopwords.words("english"))
+    def clean(sent: str) -> str:
+        sent = sent.lower()
+        sent = re.sub(r"[^a-z0-9\s.]", " ", sent)  # garder le point
+        tokens = word_tokenize(sent)
+        tokens = [lemmatizer.lemmatize(t) for t in tokens if t not in sw and t.strip() and t != "."]
+        return " ".join(tokens)
+    def process(text: str) -> str:
+        sents = sent_tokenize(text)
+        cleaned = [clean(s) for s in sents if s.strip()]
+        return " . ".join(cleaned)  # . comme séparateur de phrase
+    out = df.copy()
+    out["processed_sentences"] = out["text"].apply(process)
+    return out
+
+
+
 def split_tags(tag_string: str, sep: str = "|") -> list[str]:
     return [t.strip().lower() for t in tag_string.split(sep) if t.strip()]
+
 
 
 def keep_top_k_tags(df: pd.DataFrame, top_k: int = 10, sep: str = "|") -> pd.DataFrame:
