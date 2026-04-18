@@ -1,9 +1,10 @@
 services:
   notebook:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: semantic_tag_notebook
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.gpu
+    # container_name: semantic_tag_notebook
+    image: semantic_tag_notebook_gpu
     restart: unless-stopped
     ports:
       - "8891:8891"

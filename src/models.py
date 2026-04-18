@@ -192,7 +192,7 @@ def train_doc2vec_model(X_train: list[str], y_train: np.ndarray, X_test: list[st
         window=3,
         min_count=2,
         workers=1,
-        epochs=20,
+        epochs=30,
         seed=42,
     )
     doc2vec.build_vocab(tagged_docs)
@@ -269,7 +269,10 @@ def build_bigru_attention_model(
         weights=[embedding_matrix],
         trainable=embeddings_trainable,
     )(input_ids)
-    x = layers.Bidirectional(layers.GRU(25, return_sequences=True, recurrent_dropout=1e-6))(x)
+    x = layers.Bidirectional(layers.GRU(25, 
+    return_sequences=True, 
+    # recurrent_dropout=1e-6
+    ))(x)
     # x = layers.Bidirectional(layers.GRU(25, return_sequences=True))(x)
     x = TemporalAttention()(x)
     x = layers.Dropout(0.2)(x)
@@ -293,7 +296,7 @@ def train_bigru_attention_model(
     max_words: int = 15000,
     max_len: int = 300,
     glove_path: str | Path | None = "data/glove.6B.300d.txt",
-    epochs: int = 30,
+    epochs: int = 60,
     batch_size: int = 64,
 ) -> tuple[np.ndarray, dict]:
     print("Training Bi-GRU+Attention model...")
@@ -350,6 +353,7 @@ class BahdanauAttention(layers.Layer):
     def __init__(self, units: int, **kwargs: Any):
         super().__init__(**kwargs)
         self.units = units
+        self.supports_masking = True  
 
     def build(self, input_shape):
         self.W = self.add_weight(
@@ -392,9 +396,13 @@ def texts_to_hierarchical_sequences(
         if not sentences:
             continue
         seqs = tokenizer.texts_to_sequences(sentences)
-        padded = pad_sequences(seqs, maxlen=max_words, padding="pre", truncating="pre")
-        start = max_sentences - padded.shape[0]
-        out[i, start:, :] = padded
+        seqs = [s for s in seqs if s]          # drop sentences that tokenize to []
+        if not seqs:
+            continue
+        padded = pad_sequences(
+            seqs, maxlen=max_words, padding="post", truncating="post"
+        )
+        out[i, : padded.shape[0], :] = padded
     return out
 
 
@@ -420,10 +428,14 @@ def build_hierarchical_bigru_attention_model(
         output_dim=embedding_matrix.shape[1],
         weights=[embedding_matrix],
         trainable=embeddings_trainable,
-        mask_zero=True,
+        mask_zero=False,
     )(word_input)
     word_hidden = layers.Bidirectional(
-        layers.GRU(word_gru_units, return_sequences=True, recurrent_dropout=1e-6)
+        layers.GRU(
+            word_gru_units, 
+            return_sequences=True, 
+            # recurrent_dropout=1e-6
+            )
         # layers.GRU(word_gru_units, return_sequences=True)
     )(emb)
     sentence_vector = BahdanauAttention(attention_units, name="word_attention")(word_hidden)
@@ -433,7 +445,10 @@ def build_hierarchical_bigru_attention_model(
     doc_input = layers.Input(shape=(max_sentences, max_words), name="doc_input")
     sentences_encoded = layers.TimeDistributed(sentence_encoder, name="apply_word_encoder")(doc_input)
     sent_hidden = layers.Bidirectional(
-        layers.GRU(sent_gru_units, return_sequences=True, recurrent_dropout=1e-6)
+        layers.GRU(
+            sent_gru_units, return_sequences=True,
+            # recurrent_dropout=1e-6
+            )
         # layers.GRU(sent_gru_units, return_sequences=True)
     )(sentences_encoded)
     doc_vector = BahdanauAttention(attention_units, name="sentence_attention")(sent_hidden)
@@ -460,7 +475,7 @@ def train_hierarchical_bigru_attention_model(
     max_sentences: int = 10,
     max_words_per_sentence: int = 50,
     glove_path: str | Path | None = "data/glove.6B.300d.txt",
-    epochs: int = 30,
+    epochs: int = 60,
     batch_size: int = 64,
 ) -> tuple[np.ndarray, dict]:
     print("Training Hierarchical Bi-GRU+Attention model...")
